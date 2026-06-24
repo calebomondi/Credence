@@ -1,0 +1,59 @@
+.ambientBg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  will-change: transform;
+}
+
+.orb1 {
+  width: 700px;
+  height: 700px;
+  top: -15%;
+  left: -10%;
+  background: radial-gradient(circle, var(--orb-1-color) 0%, transparent 60%);
+  animation: drift1 35s ease-in-out infinite;
+}
+
+.orb2 {
+  width: 550px;
+  height: 550px;
+  bottom: -20%;
+  right: -5%;
+  background: radial-gradient(circle, var(--orb-2-color) 0%, transparent 60%);
+  animation: drift2 40s ease-in-out infinite;
+}
+
+.orb3 {
+  width: 450px;
+  height: 450px;
+  top: 30%;
+  left: 60%;
+  background: radial-gradient(circle, var(--orb-3-color) 0%, transparent 60%);
+  animation: drift3 30s ease-in-out infinite;
+}
+
+@keyframes drift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(80px, -60px) scale(1.05); }
+  66% { transform: translate(-40px, 40px) scale(0.95); }
+}
+
+@keyframes drift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-60px, 80px) scale(0.95); }
+  66% { transform: translate(50px, -30px) scale(1.05); }
+}
+
+@keyframes drift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, 40px) scale(1.03); }
+  66% { transform: translate(-30px, -50px) scale(0.97); }
+}

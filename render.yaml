@@ -1,0 +1,53 @@
+services:
+  # ─── Backend API ──────────────────────────────────────
+  - type: web
+    name: credence-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma db push --accept-data-loss && node dist/main
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: PORT
+        value: "4000"
+      - key: DATABASE_URL
+        value: file:/data/dev.db
+      - key: STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: STELLAR_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: CONTRACT_ID
+        value: CBIYSGXEVABVVUGPSXIZOGFSVLAVDB6S6PDLW6RSK35BHECQGXKLCD42
+      - key: ADMIN_SECRET_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://credence-frontend.onrender.com
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1
+
+  # ─── Frontend ─────────────────────────────────────────
+  - type: web
+    name: credence-frontend
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://credence-backend.onrender.com
+      - key: NEXT_PUBLIC_CONTRACT_ID
+        value: CBIYSGXEVABVVUGPSXIZOGFSVLAVDB6S6PDLW6RSK35BHECQGXKLCD42
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false

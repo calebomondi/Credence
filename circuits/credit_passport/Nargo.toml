@@ -1,0 +1,6 @@
+[package]
+name = "credit_passport"
+type = "bin"
+authors = ["stellar-hack"]
+
+[dependencies]
