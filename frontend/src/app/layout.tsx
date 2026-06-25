@@ -8,6 +8,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 export const metadata: Metadata = {
   title: 'Credence | Onchain Financial Identity',
   description: 'Prove your onchain portfolio value and history. Privately. On Stellar.',
+  icons: [{ rel: 'icon', url: '/Credence.png' }],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
