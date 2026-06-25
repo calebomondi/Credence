@@ -1,16 +1,17 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import cors from 'cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors({
+  app.use(cors({
     origin: [
       'http://localhost:3000',
       'https://credence-frontend.onrender.com',
       ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
     ],
     credentials: true,
-  });
+  }));
   const port = process.env.PORT || 4000;
   await app.listen(port);
   console.log(`Backend listening on port ${port}`);
