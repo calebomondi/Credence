@@ -10,8 +10,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
-      - key: PORT
-        value: "4000"
       - key: DATABASE_URL
         value: file:/data/dev.db
       - key: STELLAR_RPC_URL
