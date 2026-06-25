@@ -41,14 +41,31 @@ export class VascoreService {
       server.payments().forAccount(address).order('desc').limit(200).call().catch(() => null),
     ]);
 
-    // Portfolio value
     const xlmPrice = await this.priceService.getXlmPrice();
+
+    // Portfolio value — collect unique asset codes, fetch prices, sum
     let portfolioValue = 0;
+    const assetCodes = new Set<string>();
     if (accountRes) {
       for (const b of accountRes.balances as any[]) {
-        const amt = parseFloat(b.balance);
-        if (b.asset_type === 'native') portfolioValue += amt * xlmPrice;
-        else if (b.asset_type !== 'liquidity_pool_shares' && b.asset_code === 'USDC') portfolioValue += amt;
+        if (b.asset_type === 'native') {
+          portfolioValue += parseFloat(b.balance) * xlmPrice;
+        } else if (b.asset_type !== 'liquidity_pool_shares') {
+          assetCodes.add(b.asset_code);
+        }
+      }
+    }
+    const prices = new Map<string, number>();
+    await Promise.all(
+      Array.from(assetCodes).map(async (code) => {
+        prices.set(code, await this.priceService.getAssetPrice(code));
+      }),
+    );
+    if (accountRes) {
+      for (const b of accountRes.balances as any[]) {
+        if (b.asset_type !== 'native' && b.asset_type !== 'liquidity_pool_shares') {
+          portfolioValue += parseFloat(b.balance) * (prices.get(b.asset_code) ?? 0.10);
+        }
       }
     }
     portfolioValue = Math.round(portfolioValue * 100) / 100;
@@ -58,7 +75,7 @@ export class VascoreService {
       ? (accountRes.balances as any[]).filter((b: any) => b.asset_type !== 'liquidity_pool_shares' && b.asset_type !== 'native').length
       : 0;
 
-    // Account age from oldest transaction or last_modified_ledger
+    // Account age
     let accountAgeMonths = 0;
     if (oldTxRes && oldTxRes.records.length > 0) {
       const firstTx = oldTxRes.records[0] as any;
@@ -78,13 +95,10 @@ export class VascoreService {
     const totalTxs = txs.length;
     const failedTxs = txs.filter((t) => !t.successful).length;
 
-    // Frequency
     const txFrequencyPerMonth = totalTxs / accountAgeMonths;
-
-    // Failed ratio
     const failedTxRatio = totalTxs > 0 ? failedTxs / totalTxs : 0;
 
-    // Payment analysis
+    // Payment analysis — fetch prices for all asset codes in payments
     const payments: RawPayment[] = (paymentsRes?.records ?? []).map((r: any) => ({
       amount: r.amount || '0',
       from: r.from,
@@ -92,6 +106,19 @@ export class VascoreService {
       asset_type: r.asset_type,
       asset_code: r.asset_code,
     }));
+    const paymentAssetCodes = new Set<string>();
+    for (const p of payments) {
+      if (p.asset_type !== 'native' && p.asset_code) {
+        paymentAssetCodes.add(p.asset_code);
+      }
+    }
+    await Promise.all(
+      Array.from(paymentAssetCodes).map(async (code) => {
+        if (!prices.has(code)) {
+          prices.set(code, await this.priceService.getAssetPrice(code));
+        }
+      }),
+    );
 
     let avgPaymentVolumeUsd = 0;
     let incomingUsd = 0;
@@ -100,7 +127,9 @@ export class VascoreService {
       let totalUsd = 0;
       for (const p of payments) {
         const amt = parseFloat(p.amount) || 0;
-        const inUsd = p.asset_type === 'native' ? amt * xlmPrice : p.asset_code === 'USDC' ? amt : amt * 0.5;
+        const inUsd = p.asset_type === 'native'
+          ? amt * xlmPrice
+          : amt * (p.asset_code ? (prices.get(p.asset_code) ?? 0.10) : 0.10);
         totalUsd += inUsd;
         if (p.to === address) incomingUsd += inUsd;
         else if (p.from === address) outgoingUsd += inUsd;
@@ -108,10 +137,8 @@ export class VascoreService {
       avgPaymentVolumeUsd = totalUsd / payments.length;
     }
 
-    // IO ratio (1:1 = perfect)
     const ioRatio = outgoingUsd > 0 ? incomingUsd / outgoingUsd : incomingUsd > 0 ? 2 : 1;
 
-    // Consistency
     const monthsActive = new Set(
       txs.map((t) => {
         const d = new Date(t.createdAt);
@@ -120,7 +147,6 @@ export class VascoreService {
     ).size;
     const consistencyPct = Math.min((monthsActive / Math.max(accountAgeMonths, 1)) * 100, 100);
 
-    // Normalize each signal to 0–100
     const normPortfolio = Math.min((portfolioValue / 25000) * 100, 100);
     const normAge = Math.min((accountAgeMonths / 36) * 100, 100);
     const normFrequency = Math.min((txFrequencyPerMonth / 30) * 100, 100);
@@ -130,7 +156,6 @@ export class VascoreService {
     const normTrustlines = Math.min((trustlineCount / 10) * 100, 100);
     const normConsistency = consistencyPct;
 
-    // Weighted sum
     const scoreNumeric = Math.round(
       normPortfolio * 0.30 +
       normAge * 0.15 +
@@ -177,11 +202,9 @@ export class VascoreService {
     const totalFailed = wallets.reduce((s, w) => s + w.failedTxRatio * w.txFrequencyPerMonth * w.accountAgeMonths, 0);
     const avgTxFreq = totalTxs / maxAge;
     const avgFailedRatio = totalTxs > 0 ? totalFailed / totalTxs : 0;
-    const unionTrustlines = new Set<string>();
     const totalTrustlines = wallets.reduce((s, w) => s + w.trustlineCount, 0);
     const avgVolume = wallets.reduce((s, w) => s + w.avgPaymentVolumeUsd, 0) / wallets.length;
     const totalIncoming = wallets.reduce((s, w) => s + w.ioRatio, 0);
-    const totalOutgoing = 1;
     const combinedIoRatio = totalIncoming / wallets.length;
     const avgConsistency = wallets.reduce((s, w) => s + w.consistencyPct * w.accountAgeMonths, 0) / wallets.reduce((s, w) => s + w.accountAgeMonths, 0);
 

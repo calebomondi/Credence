@@ -13,15 +13,22 @@ export class PortfolioService {
       const server = new Horizon.Server(this.horizonUrl, { allowHttp: true });
       const account = await server.loadAccount(address);
 
+      const prices = new Map<string, number>();
       let totalUsd = 0;
+
       for (const balance of account.balances) {
         const amount = parseFloat(balance.balance);
         if (balance.asset_type === 'native') {
           totalUsd += amount * xlmPrice;
-        } else if (balance.asset_type !== 'liquidity_pool_shares' && 'asset_code' in balance && balance.asset_code === 'USDC') {
-          totalUsd += amount;
+        } else if (balance.asset_type !== 'liquidity_pool_shares') {
+          const code = (balance as any).asset_code;
+          if (!prices.has(code)) {
+            prices.set(code, await this.priceService.getAssetPrice(code));
+          }
+          totalUsd += amount * prices.get(code)!;
         }
       }
+
       return Math.round(totalUsd * 100) / 100;
     } catch {
       return 0;
