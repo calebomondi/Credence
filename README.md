@@ -1,6 +1,6 @@
 # Crypto Credit Passport
 
-> Prove your crypto portfolio value and onchain activity history on Stellar — without revealing your holdings.
+> Prove your crypto portfolio value and onchain activity history on Stellar — without revealing your wallet addresses.
 
 A zero-knowledge credit scoring system built on **Stellar + Soroban + Noir**. Users generate UltraHonk ZK proofs that their portfolio exceeds a threshold, mint a passport on Stellar testnet, and get a verifiable credential backed by a privacy-preserving VAScore (0–100, displayed A–F).
 
