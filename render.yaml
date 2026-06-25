@@ -17,7 +17,7 @@ services:
       - key: STELLAR_HORIZON_URL
         value: https://horizon-testnet.stellar.org
       - key: CONTRACT_ID
-        value: CBIYSGXEVABVVUGPSXIZOGFSVLAVDB6S6PDLW6RSK35BHECQGXKLCD42
+        value: CB3R2DC33MS6ZUQUXDXJ24FLKPYVKDL6EDJ6HT2KPETEXPQ5TSZGFTKY
       - key: ADMIN_SECRET_KEY
         sync: false
       - key: SUPABASE_URL
@@ -44,7 +44,7 @@ services:
       - key: NEXT_PUBLIC_API_URL
         value: https://credence-backend.onrender.com
       - key: NEXT_PUBLIC_CONTRACT_ID
-        value: CBIYSGXEVABVVUGPSXIZOGFSVLAVDB6S6PDLW6RSK35BHECQGXKLCD42
+        value: CB3R2DC33MS6ZUQUXDXJ24FLKPYVKDL6EDJ6HT2KPETEXPQ5TSZGFTKY
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY

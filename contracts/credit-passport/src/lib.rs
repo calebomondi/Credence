@@ -61,10 +61,6 @@ impl CreditPassport {
     ) -> Result<PassportMetadata, Error> {
         user.require_auth();
 
-        if env.storage().persistent().has(&DataKey::Passport(user.clone())) {
-            return Err(Error::AlreadyIssued);
-        }
-
         let expected_tier = tier_from_value(portfolio_value);
         if expected_tier == 0 {
             return Err(Error::InvalidTier);
@@ -145,7 +141,7 @@ use super::*;
     }
 
     #[test]
-    fn test_cannot_double_issue() {
+    fn test_can_reissue() {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
@@ -167,14 +163,17 @@ use super::*;
             &proof,
         );
 
+        let commitment2 = BytesN::from_array(&env, &[2u8; 32]);
         let result = client.try_verify_and_issue(
             &user,
             &portfolio_value,
-            &commitment,
+            &commitment2,
             &tier,
             &proof,
         );
-        assert_eq!(result, Err(Ok(Error::AlreadyIssued)));
+        assert!(result.is_ok());
+        let meta = client.get_passport(&user).unwrap();
+        assert_eq!(meta.commitment, commitment2);
     }
 
     #[test]

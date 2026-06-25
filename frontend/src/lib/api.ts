@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').replace(/\/+$/, '');
 
 export async function fetchStellarPortfolio(stellarAddresses: string[]) {
   if (stellarAddresses.length === 0) return { totalValueUsd: 0 };
