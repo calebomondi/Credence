@@ -130,8 +130,17 @@ export default function SearchPage() {
       </main>
 
       <footer>
-        <div className="border-t max-w-6xl bg-[var(--accent)]/10 mx-auto border-default py-6 text-center text-sm text-primary-30">
-          Credence &middot; Built on Stellar Network &middot; Powered by ZK Proofs
+        <div className="max-w-6xl mx-auto border-t border-default py-6 text-center text-sm text-primary-60 bg-[#5271ff]/10">
+          Credence &middot;{' '} Built {' '} on {' '}
+          <a
+            href="https://stellar.org"
+            className="text-accent hover:underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Stellar
+          </a>{' '}
+          Network &middot; Powered by Zero-Knowledge Proofs
         </div>
       </footer>
     </div>
