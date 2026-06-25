@@ -1,9 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useRef } from 'react';
-import { toPng } from 'html-to-image';
-import jsPDF from 'jspdf';
+import { useEffect, useState } from 'react';
 import { useStellarWallet } from '@/lib/stellar-wallet-context';
 import { useAuth } from '@/lib/use-auth';
 import { getMyPassport } from '@/lib/api';
@@ -24,7 +22,6 @@ export default function PassportPage() {
   const { user, session } = useAuth();
   const userEmail = user?.email
   const token = session?.access_token;
-  const cardRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState('');
   const [passport, setPassport] = useState<{
     commitment: string;
@@ -66,15 +63,8 @@ export default function PassportPage() {
     ? `CRD-${new Date(passport.verifiedAt * 1000).getFullYear()}-${passport.commitment.slice(2, 8).toUpperCase()}`
     : null;
 
-  const handleExportPdf = async () => {
-    if (!cardRef.current) return;
-    const imgData = await toPng(cardRef.current, { quality: 1, pixelRatio: 2 });
-    const pdf = new jsPDF('l', 'mm', 'a4');
-    const pdfW = pdf.internal.pageSize.getWidth();
-    const cardEl = cardRef.current;
-    const pdfH = (pdfW * cardEl.offsetHeight) / cardEl.offsetWidth;
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
-    pdf.save(`Credence-Passport-${passportNumber ?? 'unknown'}.pdf`);
+  const handleExportPdf = () => {
+    window.print();
   };
 
   return (
@@ -111,7 +101,7 @@ export default function PassportPage() {
           {!loading && passport && (
             <>
               {/** Passport View */}
-              <div ref={cardRef}>
+              <div className="print-area">
                 <PassportCard 
                   passportNumber={passportNumber as string}
                   tierName={tierName as string}
@@ -134,9 +124,13 @@ export default function PassportPage() {
                   scoreColors={scoreColors}
                 />
               </div>
+            </>
+          )}
 
-              {/** Buttons */}
-              <div className="mt-6 flex md:flex-row flex-col gap-4">
+          {!loading && passport && (
+            <>
+              {/** Buttons — hidden in print */}
+              <div className="mt-6 flex md:flex-row flex-col gap-4 no-print">
                 <button
                   onClick={handleExportPdf}
                   className="flex-1 px-6 py-3 rounded-full cursor-pointer bg-accent text-accent-foreground font-semibold hover:opacity-90 transition-all"

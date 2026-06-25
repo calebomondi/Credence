@@ -171,3 +171,98 @@
 .animate-check-pop {
   animation: check-pop 0.3s ease-out forwards;
 }
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+  }
+
+  :root {
+    --bg-primary: #F5F2ED !important;
+    --bg-surface: #FFFFFF !important;
+    --text-primary: #0F172A !important;
+    --text-secondary: #6B7280 !important;
+    --accent: #5271FF !important;
+    --accent-foreground: #FFFFFF !important;
+    --border-color: rgba(0, 0, 0, 0.08) !important;
+    --alpha-5: rgba(0, 0, 0, 0.05) !important;
+    --success: #1ED760 !important;
+  }
+
+  .Header,
+  .ambient-bg,
+  .no-print,
+  header,
+  nav,
+  footer,
+  button,
+  [role="navigation"],
+  [aria-label="navigation"] {
+    display: none !important;
+  }
+
+  .print-branding {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .print-branding .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .print-branding .brand-logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .print-branding .brand-name {
+    font-family: 'Manrope', 'Segoe UI', 'Helvetica Neue', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #5271FF;
+  }
+
+  .print-branding .slogan {
+    font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    color: #6B7280;
+    margin: 0;
+  }
+
+  .print-area {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    break-inside: avoid !important;
+    width: 100% !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  .print-area .hidden {
+    display: flex !important;
+  }
+
+  .print-area .lg\:hidden {
+    display: none !important;
+  }
+
+  .passport-card,
+  [class*="passport-card"] {
+    border: 2px solid #5271FF !important;
+    background: #FFFFFF !important;
+  }
+}
