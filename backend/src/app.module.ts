@@ -6,6 +6,8 @@ import { PassportModule } from './passport/passport.module';
 import { ProvingModule } from './proving/proving.module';
 import { AuthModule } from './auth/auth.module';
 import { VascoreModule } from './vascore/vascore.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -17,5 +19,7 @@ import { VascoreModule } from './vascore/vascore.module';
     AuthModule,
     VascoreModule,
   ],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
