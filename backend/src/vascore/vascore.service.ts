@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Horizon } from '@stellar/stellar-sdk';
+import { PriceService } from '../price/price.service';
 import type { WalletScoreData, ScoreLevel, CombinedScore } from './vascore.types';
 
 const LEVELS: [number, ScoreLevel][] = [
@@ -28,18 +29,7 @@ interface RawPayment {
 export class VascoreService {
   private horizonUrl = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
 
-  private async fetchXlmPrice(): Promise<number> {
-    try {
-      const res = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd',
-        { headers: { Accept: 'application/json' } },
-      );
-      const data = await res.json();
-      return data.stellar?.usd ?? 0.10;
-    } catch {
-      return 0.10;
-    }
-  }
+  constructor(private readonly priceService: PriceService) {}
 
   async computeWalletScore(address: string): Promise<WalletScoreData> {
     const server = new Horizon.Server(this.horizonUrl, { allowHttp: true });
@@ -52,7 +42,7 @@ export class VascoreService {
     ]);
 
     // Portfolio value
-    const xlmPrice = await this.fetchXlmPrice();
+    const xlmPrice = await this.priceService.getXlmPrice();
     let portfolioValue = 0;
     if (accountRes) {
       for (const b of accountRes.balances as any[]) {
@@ -75,7 +65,6 @@ export class VascoreService {
       const created = new Date(firstTx.created_at);
       accountAgeMonths = Math.max(1, Math.round((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24 * 30)));
     } else if (accountRes) {
-      // fallback: use last_modified_ledger timestamp approximation — just set 1 month
       accountAgeMonths = 1;
     } else {
       accountAgeMonths = 1;
@@ -111,7 +100,7 @@ export class VascoreService {
       let totalUsd = 0;
       for (const p of payments) {
         const amt = parseFloat(p.amount) || 0;
-        const inUsd = p.asset_type === 'native' ? amt * xlmPrice : p.asset_code === 'USDC' ? amt : amt * 0.5; // rough non-XLM/USDC
+        const inUsd = p.asset_type === 'native' ? amt * xlmPrice : p.asset_code === 'USDC' ? amt : amt * 0.5;
         totalUsd += inUsd;
         if (p.to === address) incomingUsd += inUsd;
         else if (p.from === address) outgoingUsd += inUsd;
@@ -189,13 +178,11 @@ export class VascoreService {
     const avgTxFreq = totalTxs / maxAge;
     const avgFailedRatio = totalTxs > 0 ? totalFailed / totalTxs : 0;
     const unionTrustlines = new Set<string>();
-    // Trustlines per wallet already counted individually; for combined use max as proxy for union
-    // Actually just sum them since they're from different addresses
     const totalTrustlines = wallets.reduce((s, w) => s + w.trustlineCount, 0);
     const avgVolume = wallets.reduce((s, w) => s + w.avgPaymentVolumeUsd, 0) / wallets.length;
     const totalIncoming = wallets.reduce((s, w) => s + w.ioRatio, 0);
-    const totalOutgoing = 1; // dummy — we don't store absolute incoming/outgoing, approximate
-    const combinedIoRatio = totalIncoming / wallets.length; // rough average
+    const totalOutgoing = 1;
+    const combinedIoRatio = totalIncoming / wallets.length;
     const avgConsistency = wallets.reduce((s, w) => s + w.consistencyPct * w.accountAgeMonths, 0) / wallets.reduce((s, w) => s + w.accountAgeMonths, 0);
 
     const normPortfolio = Math.min((totalPortfolio / 25000) * 100, 100);
