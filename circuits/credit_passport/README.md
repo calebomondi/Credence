@@ -1,8 +1,25 @@
-# Credit Passport — Noir Circuit
+# Credit Passport — Original Noir Circuit (Deprecated)
 
-Zero-knowledge circuit that proves a user's portfolio value meets or exceeds a tier threshold without revealing the exact value.
+> **⚠️ This circuit is no longer used in production.** It has been replaced by a Rust Arkworks R1CS circuit at `backend/prover/src/main.rs`. See below for details.
 
-## Constraint
+## History
+
+The original circuit was written in **Noir** (v1.0.0-beta.22) and proved `portfolio_value >= threshold` with a single `assert(!portfolio_value.lt(threshold))` constraint. It compiled to ACIR bytecode (`~50KB`) and was verified off-chain via UltraHonk WASM (`@aztec/bb.js`).
+
+## Why It Was Replaced
+
+| Factor | Old (Noir + UltraHonk) | New (Rust + Groth16) |
+|--------|----------------------|---------------------|
+| Proof scheme | UltraHonk (transparent, no trusted setup) | **Groth16** (smallest proofs, fastest verification) |
+| Proof size | ~10KB | **384 bytes** (96 + 192 + 96) |
+| On-chain verification | SHA-256 placeholder (not real ZK) | **Real on-chain verifier** via BLS12-381 host functions (CAP-0059) |
+| Proving time | ~13s cold / ~1s warm (WASM) | Sub-second (native x86-64) |
+| Dependencies | 3 heavy npm WASM packages | Single Rust binary + 6 Arkworks crates |
+| Prover portability | Node.js only | Any platform (binary) |
+
+The critical driver was that **UltraHonk is not verifiable on Stellar**. There is no UltraHonk verifier available for the Soroban environment. By switching to Groth16 on BLS12-381, we can use Stellar's native `bls12_381.pairing_check()` host function (CAP-0059) for on-chain verification — the same curve mandated by Stellar for ZK use cases.
+
+## Original Circuit
 
 ```noir
 fn main(portfolio_value: Field, threshold: pub Field) {
@@ -10,96 +27,26 @@ fn main(portfolio_value: Field, threshold: pub Field) {
 }
 ```
 
-- `portfolio_value` — **private** witness (hidden from the verifier)
-- `threshold` — **public** input (visible on-chain, emitted as a public input)
-- Proves `portfolio_value >= threshold` using Noir's native field arithmetic
-- The single constraint compiles to ~3 ACIR opcodes, producing a ~50KB ACIR bytecode file
+- `portfolio_value` — private witness (hidden from verifier)
+- `threshold` — public input (visible on-chain)
+- Proved `portfolio_value >= threshold`
 
-## Threshold Mapping
+## Files (kept for reference)
 
-Portfolio values are scaled to **cents** (multiplied by 100) before entering the circuit. The backend rounds `portfolioValue * 100` to an integer before passing it as the circuit input.
-
-| Tier | Dollar Threshold | Circuit Input (cents) | Circuit Public Output |
-|------|-----------------|----------------------|----------------------|
-| 1 — Silver | $1,000 | 100000 | threshold = 100000 |
-| 2 — Gold | $5,000 | 500000 | threshold = 500000 |
-| 3 — Platinum | $25,000 | 2500000 | threshold = 2500000 |
-
-## Data Flow
-
-```mermaid
-flowchart LR
-  PV["Backend: portfolioValue (dollars, float)"] -->|"Math.round(value * 100)"| CV["portfolio_value (cents, int)<br/>7799 → 779900"]
-  CV -->|"private witness"| C["Noir Circuit<br/>main.nr"]
-  TH["Backend: getThresholdForTier(tier)"] -->|"public input"| C
-  C -->|"UltraHonk"| P["Proof (bytes)"]
-  P -->|"verified on-chain<br/>(placeholder: SHA-256 hash)"| SC["Soroban Contract"]
-```
-
-## Files
-
-| File / Dir | Purpose |
-|------------|---------|
-| `src/main.nr` | Circuit definition (3 lines: `portfolio_value >= threshold`) |
-| `Nargo.toml` | Package manifest (`type = "bin"`, no dependencies) |
+| File | Purpose |
+|------|---------|
+| `src/main.nr` | Original circuit definition |
+| `Nargo.toml` | Package manifest |
 | `Prover.toml` | Example inputs for `nargo execute` |
-| `Verifier.toml` | Expected public inputs for verification |
-| `target/credit_passport.json` | **Compiled ACIR bytecode + ABI** (~50KB). The backend loads this at runtime via `@noir-lang/noir_js` to reconstruct the circuit and generate witnesses. **This is the essential production artifact.** |
-| `target/credit_passport.gz` | Pre-computed witness from `nargo execute` using `Prover.toml`. Not used in production — the backend generates witnesses dynamically from real user inputs. |
-| `target/proof/` | **Empty.** Would contain `nargo prove` output, but bb CLI 4.x is incompatible with this ACIR format (see compatibility note below). |
-| `target/vk/` | **Empty.** Would contain verification key from `nargo prove`. The backend generates the VK itself via bb.js WASM (`UltraHonkBackend.generateProof` returns VK). |
-| `target/vk_chonk/` | **Empty.** Legacy Honk verification key directory. Unused. |
-| `build.sh` | Shell script: `nargo compile && nargo execute && nargo info` |
+| `Verifier.toml` | Expected public inputs |
+| `target/credit_passport.json` | Compiled ACIR bytecode |
 
-The backend only needs `target/credit_passport.json`. The `proof/` and `vk/` subdirectories are empty because `nargo prove` calls the bb CLI binary under the hood, which crashes on Noir 1.0.0-beta.22 ACIR. Instead, all proving and verification happens inside the Node.js process via `@aztec/bb.js` WASM, bypassing the bb CLI entirely.
+## Current Production Circuit
 
-## Build Process
+See `backend/prover/src/main.rs` — a Rust R1CS circuit using `ark-r1cs-std`:
 
-```mermaid
-flowchart LR
-  src["src/main.nr"] -->|"nargo compile"| acir["target/credit_passport.json<br/>ACIR bytecode"]
-  src -->|"nargo execute"| witness["target/credit_passport.gz<br/>(pre-computed witness)"]
-  acir -->|"loaded by backend<br/>@noir-lang/noir_js"| noirJS["Noir.execute()"]
-  inputs["user inputs<br/>{portfolio_value_cents, threshold}"] --> noirJS
-  noirJS -->|"witness"| bb["@aztec/bb.js<br/>UltraHonkBackend.generateProof()"]
-  bb -->|"proof + VK"| verify["UltraHonkVerifierBackend.verify()"]
-  verify -->|"verified ✔"| return["return {proof, publicInputs, verificationKey}"]
-```
-
-## Commands
-
-```bash
-# Compile to ACIR bytecode
-nargo compile
-
-# Generate witness from Prover.toml
-nargo execute
-
-# Gate count / circuit info
-nargo info
-
-# Build all artifacts (compile + execute + info)
-./build.sh
-```
-
-## Prover.toml
-
-```toml
-portfolio_value = "770000"
-threshold = "500000"
-```
-
-This proves `770000 >= 500000` → passport tier 3 (Platinum) unlocked when the portfolio value is $7,700 or more (770000 cents = $7,700).
-
-## ACIR Compatibility
-
-**bb CLI 4.x is incompatible** with Noir 1.0.0-beta.22 ACIR format — crashes with `Circuit::current_witness_index`.
-
-Use the npm package `@aztec/bb.js@6.0.0-nightly.20260605` instead. It handles both proof generation and verification via UltraHonk scheme, entirely in WASM within the Node.js process.
-
-| Approach | Status |
-|----------|--------|
-| `nargo prove` (uses bb CLI) | ❌ Crashes — ACIR format mismatch |
-| `bb CLI 4.3.1` / `4.4.0-nightly` | ❌ All crash |
-| `@aztec/bb.js 0.56.0` | ❌ Incompatible API |
-| `@aztec/bb.js 6.0.0-nightly.20260605` | ✅ Works — proof generation + verification |
+- **Equality constraint**: `value == threshold` (2× 64-bit limbs)
+- **2 public inputs**, **2 private witnesses**
+- **Scheme**: Groth16 over BLS12-381 (`ark-groth16`)
+- **Proof**: 3 group elements (A: G1, B: G2, C: G1) → 384 bytes uncompressed
+- **Verification**: On-chain via Stellar `bls12_381.pairing_check()`
