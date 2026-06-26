@@ -48,10 +48,11 @@ export default function GenerateProof() {
   const [proofResult, setProofResult] = useState<{
     commitment: string;
     tier: number;
-    proof: string;
-    verificationKey: string;
+    proof: { a: string; b: string; c: string };
+    publicSignals: string[];
+    vascore: number;
+    walletCount: number;
     nonce: string;
-    publicInputs: string[];
   } | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [portfolioValueForContract, setPortfolioValueForContract] = useState(0);
@@ -107,10 +108,11 @@ export default function GenerateProof() {
     proofRes: {
       commitment: string;
       tier: number;
-      proof: string;
-      verificationKey: string;
+      proof: { a: string; b: string; c: string };
+      publicSignals: string[];
+      vascore: number;
+      walletCount: number;
       nonce: string;
-      publicInputs: string[];
     },
     portfolioValueUsd: number,
   ) => {
@@ -120,15 +122,51 @@ export default function GenerateProof() {
     const rpc = new StellarSdk.rpc.Server(rpcUrl);
 
     const userScVal = StellarSdk.Address.fromString(stellarAddr!).toScVal();
+
     const portfolioValueScVal = StellarSdk.nativeToScVal(
       BigInt(Math.round(portfolioValueUsd * 100)),
       { type: 'u128' },
     );
-    const commitmentBytes = hexToBuffer(proofRes.commitment.replace('0x', ''));
-    const commitmentScVal = StellarSdk.xdr.ScVal.scvBytes(commitmentBytes);
+
+    const aBytes = hexToBuffer(proofRes.proof.a);
+    const bBytes = hexToBuffer(proofRes.proof.b);
+    const cBytes = hexToBuffer(proofRes.proof.c);
+
+    if (aBytes.length !== 96) throw new Error(`proof.a must be 96 bytes, got ${aBytes.length}`);
+    if (bBytes.length !== 192) throw new Error(`proof.b must be 192 bytes, got ${bBytes.length}`);
+    if (cBytes.length !== 96) throw new Error(`proof.c must be 96 bytes, got ${cBytes.length}`);
+
+
+    const proofScVal = StellarSdk.xdr.ScVal.scvMap([
+      new StellarSdk.xdr.ScMapEntry({
+        key: StellarSdk.xdr.ScVal.scvSymbol('a'),
+        val: StellarSdk.xdr.ScVal.scvBytes(hexToBuffer(proofRes.proof.a)),
+      }),
+      new StellarSdk.xdr.ScMapEntry({
+        key: StellarSdk.xdr.ScVal.scvSymbol('b'),
+        val: StellarSdk.xdr.ScVal.scvBytes(hexToBuffer(proofRes.proof.b)),
+      }),
+      new StellarSdk.xdr.ScMapEntry({
+        key: StellarSdk.xdr.ScVal.scvSymbol('c'),
+        val: StellarSdk.xdr.ScVal.scvBytes(hexToBuffer(proofRes.proof.c)),
+      }),
+    ]);
+
+    const publicSignalsScVal = StellarSdk.xdr.ScVal.scvVec(
+      proofRes.publicSignals.map((hex, i) => {
+        const buf = hexToBuffer(hex);
+        if (buf.length !== 32) throw new Error(`publicSignals[${i}] must be 32 bytes, got ${buf.length}`);
+        return StellarSdk.nativeToScVal(BigInt('0x' + hex), { type: 'u256' });
+      }),
+    );
+
+    const commitmentScVal = StellarSdk.xdr.ScVal.scvBytes(
+      hexToBuffer(proofRes.commitment.replace('0x', '')),
+    );
+
     const tierScVal = StellarSdk.nativeToScVal(proofRes.tier, { type: 'u32' });
-    const proofBytes = hexToBuffer(proofRes.proof);
-    const proofScVal = StellarSdk.xdr.ScVal.scvBytes(proofBytes);
+    const vascoreScVal = StellarSdk.nativeToScVal(proofRes.vascore, { type: 'u32' });
+    const walletCountScVal = StellarSdk.nativeToScVal(proofRes.walletCount, { type: 'u32' });
 
     const account = await rpc.getAccount(stellarAddr!);
 
@@ -141,10 +179,13 @@ export default function GenerateProof() {
         contract.call(
           'verify_and_issue',
           userScVal,
+          proofScVal,
+          publicSignalsScVal,
           portfolioValueScVal,
           commitmentScVal,
           tierScVal,
-          proofScVal,
+          vascoreScVal,
+          walletCountScVal,
         ),
       )
       .setTimeout(180)
@@ -219,6 +260,7 @@ export default function GenerateProof() {
 
       const tierNum = tierMap[selectedTier];
       const res = await preparePassport(savedValue, tierNum, user?.email as string);
+      console.log(`>>>> ${JSON.stringify(res)}`)
       savedProofResult = res;
       setProofResult(res);
       setPortfolioValueForContract(savedValue);
