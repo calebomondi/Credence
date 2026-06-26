@@ -1,81 +1,58 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Noir } from '@noir-lang/noir_js';
-import { Barretenberg, UltraHonkBackend, UltraHonkVerifierBackend } from '@aztec/bb.js';
-import { readFileSync } from 'fs';
+import { Injectable } from '@nestjs/common';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { readFileSync, unlinkSync } from 'fs';
 import { resolve } from 'path';
+import * as crypto from 'crypto';
+
+const execFileAsync = promisify(execFile);
+
+export interface Groth16Proof {
+  a: string;
+  b: string;
+  c: string;
+}
 
 export interface ProvingResult {
-  proof: string;
-  publicInputs: string[];
-  verificationKey: string;
+  proof: Groth16Proof;
+  publicSignals: string[];
 }
 
 @Injectable()
-export class ProvingService implements OnModuleInit {
-  private circuit: any;
-  private noir!: Noir;
-  private bb!: Barretenberg;
-  private backend!: UltraHonkBackend;
-  private verifier!: UltraHonkVerifierBackend;
-  private vk!: Uint8Array;
-  private initialized = false;
+export class ProvingService {
+  private proverPath: string;
+  private pkPath: string;
 
-  async onModuleInit() {
-    try {
-      const circuitPath = resolve(
-        __dirname, '..', '..', '..',
-        'circuits', 'credit_passport', 'target', 'credit_passport.json',
-      );
-      this.circuit = JSON.parse(readFileSync(circuitPath, 'utf-8'));
-
-      this.noir = new Noir(this.circuit);
-      await this.noir.init();
-
-      this.bb = await Barretenberg.new({ threads: 1 });
-      this.backend = new UltraHonkBackend(this.circuit.bytecode, this.bb);
-      this.verifier = new UltraHonkVerifierBackend(this.bb);
-
-      this.vk = await this.backend.getVerificationKey();
-
-      this.initialized = true;
-      console.log('ProvingService initialized successfully');
-    } catch (err) {
-      console.error('ProvingService initialization failed:', err);
-    }
+  constructor() {
+    this.proverPath = resolve(
+      __dirname, '..', '..', '..',
+      'backend', 'prover', 'target', 'release', 'credence-prover',
+    );
+    this.pkPath = resolve(
+      __dirname, '..', '..', '..',
+      'backend', 'prover', 'pk.bin',
+    );
   }
 
-  async generateProof(inputs: Record<string, string>): Promise<ProvingResult | null> {
-    if (!this.initialized) return null;
-
+  async generateProof(value: number, threshold: number): Promise<ProvingResult | null> {
     try {
-      const { witness } = await this.noir.execute(inputs);
-
-      const proofData = await this.backend.generateProof(witness);
-
-      const verified = await this.verifier.verifyProof({
-        proof: proofData.proof,
-        publicInputs: proofData.publicInputs,
-        verificationKey: this.vk,
-      });
-
-      if (!verified) {
-        console.error('Proof verification failed after generation');
-        return null;
-      }
-
+      const tmpFile = `/tmp/proof-${crypto.randomUUID()}.json`;
+      await execFileAsync(this.proverPath, [
+        'prove',
+        '--pk', this.pkPath,
+        '--value', value.toString(),
+        '--threshold', threshold.toString(),
+        '--output', tmpFile,
+      ]);
+      const data = JSON.parse(readFileSync(tmpFile, 'utf-8'));
+      unlinkSync(tmpFile);
       return {
-        proof: Buffer.from(proofData.proof).toString('hex'),
-        publicInputs: proofData.publicInputs.map((pi: any) => pi.toString()),
-        verificationKey: Buffer.from(this.vk).toString('hex'),
+        proof: { a: data.a, b: data.b, c: data.c },
+        publicSignals: data.public_signals,
       };
     } catch (err) {
       console.error('Proof generation failed:', err);
       return null;
     }
-  }
-
-  async getVerificationKey(): Promise<string | null> {
-    if (!this.initialized) return null;
-    return Buffer.from(this.vk).toString('hex');
   }
 }
