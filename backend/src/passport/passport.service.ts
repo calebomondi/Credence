@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ProvingService } from '../proving/proving.service';
 import { VascoreService } from '../vascore/vascore.service';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class PassportService {
@@ -15,17 +16,19 @@ export class PassportService {
   async prepareProof(portfolioValue: number, tier: number, userEmail: string) {
     const threshold = this.getThresholdForTier(tier);
     const nonce = crypto.randomUUID().replace(/-/g, '');
+    const portfolioValueCents = Math.round(portfolioValue * 100);
 
-    const proofResult = await this.proving.generateProof({
-      portfolio_value: Math.round(portfolioValue * 100).toString(),
-      threshold: threshold.toString(),
-    });
+    const proofResult = await this.proving.generateProof(portfolioValueCents, threshold);
+    if (!proofResult) return null;
 
-    const proofHex = proofResult?.proof ?? ('0x' + '00'.repeat(128));
-    const publicInputs = proofResult?.publicInputs ?? [];
-    const vkHex = proofResult?.verificationKey ?? '';
     const commitment = this.sha256(portfolioValue.toString(), nonce);
-    const proofHash = this.sha256(proofHex, vkHex);
+
+    const links = await this.prisma.walletLink.findMany({
+      where: { email: userEmail, status: 'verified' },
+    });
+    const addresses = links.map(l => l.walletAddress);
+    const scoreResult = await this.vascore.computeMultiWallet(addresses).catch(() => null);
+    const combined = scoreResult?.combined ?? { scoreNumeric: 0, scoreLevel: 'F', portfolioValue: 0, accountAgeMonths: 0, txFrequencyPerMonth: 0, trustlineCount: 0 };
 
     await this.prisma.commitment.create({
       data: {
@@ -33,16 +36,17 @@ export class PassportService {
         commitment,
         tier,
         nonce,
-        proofHash,
+        proofHash: '',
       },
     });
 
     return {
       commitment,
       tier,
-      proof: proofHex,
-      publicInputs,
-      verificationKey: vkHex,
+      proof: proofResult.proof,
+      publicSignals: proofResult.publicSignals,
+      vascore: combined.scoreNumeric,
+      walletCount: Math.max(addresses.length, 1),
       nonce,
     };
   }
@@ -72,9 +76,6 @@ export class PassportService {
       where: { commitment: commitmentHash },
       orderBy: { createdAt: 'desc' },
     });
-
-    // console.log(`commit: ${JSON.stringify(commit)}`)
-    // console.log(`issued: ${JSON.stringify(issued)}`)
 
     return {
       commitment: commit.commitment,
@@ -161,7 +162,6 @@ export class PassportService {
     });
 
     if (!issued) return null;
-    // console.log(`>> ${JSON.stringify(issued.userEmail)}`)
 
     return {
       commitment: issued.commitment,
@@ -173,7 +173,7 @@ export class PassportService {
         scoreNumeric: issued.combinedScore,
         scoreLevel: issued.scoreLevel,
       },
-      userEmail: issued.userEmail
+      userEmail: issued.userEmail,
     };
   }
 
@@ -228,7 +228,7 @@ export class PassportService {
   }
 
   private sha256(value: string, nonce: string): string {
-    const hash = require('crypto').createHash('sha256')
+    const hash = crypto.createHash('sha256')
       .update(value + nonce)
       .digest('hex');
     return '0x' + hash;
