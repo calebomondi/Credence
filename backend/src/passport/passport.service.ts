@@ -166,7 +166,7 @@ export class PassportService {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`>> ${JSON.stringify(issued)}`)
+    // console.log(`>> ${JSON.stringify(issued)}`)
 
     if (!issued) return null;
 
