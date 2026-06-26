@@ -1,5 +1,8 @@
 /target/
-pk.bin
 vk.bin
 vk.json
 proof.json
+
+# Tracked for Render deployment (build artifacts)
+!credence-prover
+!pk.bin
