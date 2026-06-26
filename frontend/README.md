@@ -1,6 +1,6 @@
 # Frontend — Crypto Credit Passport dApp (Next.js 16)
 
-Next.js dApp with Supabase Google Auth, Freighter Stellar wallet, ZK proof generation UI, Soroban contract submission, interactive passport card with 3D flip, and PDF export.
+Next.js dApp with Supabase Google Auth, Freighter Stellar wallet, **Groth16 ZK proof** submission UI, Soroban contract interaction, interactive passport card with 3D flip, and PDF export.
 
 ## Route Map
 
@@ -51,7 +51,7 @@ sequenceDiagram
 
   GP->>GP: Select tier (Silver/Gold/Platinum)
   GP->>GP: Fetch portfolio (all linked wallets)
-  GP->>GP: Generate ZK proof via backend
+  GP->>GP: Generate Groth16 ZK proof via backend
   GP->>GP: Submit verify_and_issue to Soroban (Freighter sign)
   GP->>GP: Confirm passport (backend snapshot)
   GP->>P: Navigate
@@ -87,9 +87,17 @@ Three-step process UI with animated progress indicators:
 
 1. **Portfolio fetch**: On mount, aggregates all linked wallets' portfolios via backend, shows total
 2. **Tier selection**: Three cards (Silver $1K / Gold $5K / Platinum $25K) — insufficient portfolio shows "Insufficient" label and disables the card
-3. **Proof generation**: Calls backend `preparePassport` → receives ZK proof → builds ScVals (Address, u128 cents, Bytes commitment, u32 tier, Bytes proof) → simulates Stellar transaction → signs with Freighter → submits to Soroban → polls until confirmed → calls `confirmPassport` backend endpoint to freeze snapshot
-
-On Stellar submission failure: preserves computed proof (no re-generation), offers "Retry Submission" button.
+3. **Proof generation + on-chain submission**:
+   - Calls backend `preparePassport` → receives `{ commitment, tier, proof, publicSignals, vascore, walletCount, nonce }`
+   - Builds ScVals matching the contract parameter order:
+     - `Groth16Proof` → `scvMap([{key: scvSymbol('a'), val: scvBytes(hex96)}, {key: 'b', val: scvBytes(hex192)}, {key: 'c', val: scvBytes(hex96)}])`
+     - `public_signals` → `scvVec([scvBytes(hex32), scvBytes(hex32)])`
+     - `portfolio_value` → `nativeToScVal(BigInt(cents), {type: 'u128'})`
+     - `commitment` → `scvBytes(hexToBuffer(commitment.replace('0x', '')))`
+     - `tier` / `vascore` / `wallet_count` → `nativeToScVal(u32)`
+   - Simulates Stellar transaction → signs with Freighter → submits to Soroban → polls until confirmed
+   - Calls `confirmPassport` backend endpoint to freeze snapshot
+4. On Stellar submission failure: preserves computed proof (no re-generation), offers "Retry Submission" button
 
 ### `/passport` — My Passport
 
@@ -207,7 +215,7 @@ RootLayout (app/layout.tsx)
 
 ## Wallet Integration
 
-**Stellar-only** — EVM wallets (RainbowKit, Wagmi, viem) have been removed. The only wallet integration is Freighter for the Stellar network.
+**Stellar-only** — EVM wallets have been removed. The only wallet integration is Freighter for the Stellar network.
 
 Flow:
 1. User signs in with **Google** (Supabase Auth) → JWT session
@@ -237,6 +245,29 @@ Flow:
 - **Custom classes** (in `globals.css`): `.passport-card`, `.verified-seal`, `.unverified-seal`, `.verification-stamp`
 - **Ambient background**: CSS-only animated gradient orbs, no JS animation libraries
 - **Theme toggle**: Switches `data-theme` attribute on `<html>`, all colors via CSS variable overrides
+
+## Groth16 Proof ScVal Construction
+
+In `generate-proof/page.tsx:doSubmit()`, the proof and public signals are serialized as Soroban ScVals matching the contract's Rust types:
+
+```
+Groth16Proof → scvMap([
+  { key: scvSymbol('a'), val: scvBytes(96 hex bytes) },
+  { key: scvSymbol('b'), val: scvBytes(192 hex bytes) },
+  { key: scvSymbol('c'), val: scvBytes(96 hex bytes) },
+])
+
+Vec<Bls12381Fr> → scvVec([
+  nativeToScVal(BigInt('0x' + hex), { type: 'u256' }),   // threshold_lo
+  nativeToScVal(BigInt('0x' + hex), { type: 'u256' }),   // threshold_hi
+])
+
+u128 → nativeToScVal(BigInt(cents), {type: 'u128'})
+BytesN<32> → scvBytes(hexToBuffer(commitment))
+u32 → nativeToScVal(n, {type: 'u32'})
+```
+
+The contract expects 8 parameters in this order: `user`, `proof`, `public_signals`, `portfolio_value`, `commitment`, `tier`, `vascore`, `wallet_count`.
 
 ## Setup
 
