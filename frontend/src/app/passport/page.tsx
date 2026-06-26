@@ -48,7 +48,7 @@ export default function PassportPage() {
     getMyPassport(token)
       .then((data) => {
         if (data && data.tier) {
-          console.log(`>> ${JSON.stringify(data)}`)
+          // console.log(`>> ${JSON.stringify(data)}`)
           setPassport(data);
         } else {
           setPassport(null);
