@@ -1,6 +1,6 @@
 # Backend — NestJS API (Proving Engine + Auth + Scoring)
 
-Aggregate Stellar portfolios via Horizon, generate UltraHonk ZK proofs via bb.js WASM, manage passport commitments, compute VAScores, and handle wallet binding via Supabase JWT auth.
+Aggregate Stellar portfolios via Horizon, generate **Groth16 ZK proofs** by invoking a Rust prover binary via `execFile`, manage passport commitments, compute VAScores, and handle wallet binding via Supabase JWT auth.
 
 ## Architecture
 
@@ -16,10 +16,15 @@ graph TB
   subgraph Services
     PS["PortfolioService"]
     PAS["PassportService"]
-    PRS["ProvingService"]
+    PRS["ProvingService (execFile → credence-prover)"]
     AS["AuthService"]
     VS["VascoreService"]
     PRIS["PrismaService (global)"]
+  end
+
+  subgraph Prover["credence-prover (Rust binary)"]
+    CIRCUIT["ThresholdCircuit R1CS<br/>(value == threshold)"]
+    PROV["Groth16::prove()<br/>→ JSON {a,b,c,public_signals}"]
   end
 
   subgraph External
@@ -42,6 +47,9 @@ graph TB
   PAS --> DB
   PAS --> PRS
   PAS --> VS
+
+  PRS -->|"execFile"| Prover
+  Prover -->|"JSON proof"| PRS
 
   AC --> AS
   AS --> SUPA
@@ -80,9 +88,9 @@ graph LR
 | Module | Exported | Description |
 |--------|----------|-------------|
 | **PrismaModule** | PrismaService (Global) | SQLite via Prisma 7 + `@prisma/adapter-libsql`. All services inject PrismaService. |
-| **ProvingModule** | ProvingService (Global) | Wraps `@noir-lang/noir_js` witness generation + `@aztec/bb.js` UltraHonk proof generation. Loads `credit_passport.json` on init. |
-| **PassportModule** | PassportService | Orchestrates proof generation, DB storage, VAScore computation, snapshot confirmation, search, and on-chain reads. |
-| **PortfolioModule** | PortfolioService | Fetches XLM/USDC balances from Horizon, prices XLM via CoinGecko, aggregates across multiple Stellar addresses. |
+| **ProvingModule** | ProvingService (Global) | Wraps `child_process.execFile` calling `credence-prover prove` with user inputs. Parses JSON proof output into structured `Groth16Proof {a, b, c}` + `publicSignals`. Resolves binary path relative to `__dirname`. |
+| **PassportModule** | PassportService | Orchestrates proof generation (via ProvingService), VAScore computation (via VascoreService), DB storage, snapshot confirmation, search, and on-chain reads. |
+| **PortfolioModule** | PortfolioService | Fetches XLM balances from Horizon, prices XLM via CoinGecko, aggregates across multiple Stellar addresses. |
 | **AuthModule** | SupabaseAuthGuard | Supabase JWT verification guard + wallet challenge/verify using Stellar SEP-53 signatures. |
 | **VascoreModule** | VascoreService | 8-signal credit scoring algorithm from Horizon account data. |
 
@@ -96,7 +104,7 @@ erDiagram
     string commitment "0x-prefixed SHA-256 hash"
     int tier "1=Silver 2=Gold 3=Platinum"
     string nonce "uuid without dashes"
-    string proofHash "0x-prefixed SHA-256 of proof+verificationKey"
+    string proofHash ""
     datetime createdAt
   }
   WalletLink {
@@ -115,7 +123,7 @@ erDiagram
     string commitment "matches Commitment.commitment"
     int tier
     datetime verifiedAt "when the snapshot was frozen"
-    string proofHash "matches Commitment.proofHash"
+    string proofHash ""
     int combinedScore "VAScore 0-100 at time of issuance"
     string scoreLevel "A-F at time of issuance"
     int walletCount "number of linked wallets at time of issuance"
@@ -139,7 +147,7 @@ Logic: For each address, fetches the account from Horizon, sums native XLM balan
 
 | Method | Route | Auth | Request Body / Param | Response |
 |--------|-------|------|---------------------|----------|
-| POST | `/api/passport/prepare` | None | `{ "portfolioValue": number, "tier": number, "userEmail": string }` | `{ commitment, tier, proof, publicInputs, verificationKey, nonce }` |
+| POST | `/api/passport/prepare` | None | `{ "portfolioValue": number, "tier": number, "userEmail": string }` | `{ commitment, tier, proof: {a,b,c}, publicSignals: [hex32, hex32], vascore: number, walletCount: number, nonce }` |
 | GET | `/api/passport/my` | Bearer JWT | — | `{ commitment, tier, verifiedAt, proofHash, walletCount, combinedScore: { scoreNumeric, scoreLevel }, userEmail }` |
 | POST | `/api/passport/confirm` | Bearer JWT | `{ "commitment": string }` | `{ id, userEmail, commitment, tier, combinedScore, scoreLevel, walletCount, ... }` |
 | GET | `/api/passport/search?q=` | None | query param `q` | Same shape as verify endpoint |
@@ -172,6 +180,8 @@ sequenceDiagram
   participant PAC as PassportController
   participant PAS as PassportService
   participant PRS as ProvingService
+  participant PRV as credence-prover binary
+  participant VS as VascoreService
   participant DB as SQLite
 
   F->>PAC: POST /api/passport/prepare {portfolioValue, tier, userEmail}
@@ -179,16 +189,26 @@ sequenceDiagram
   PAS->>PAS: threshold = getThresholdForTier(tier) // 100000/500000/2500000
   PAS->>PAS: portfolioValue_cents = Math.round(portfolioValue * 100)
   PAS->>PAS: nonce = crypto.randomUUID().replace(/-/g, '')
-  PAS->>PRS: generateProof({portfolio_value: portfolioValue_cents, threshold})
-  PRS->>PRS: Noir.execute(credit_passport.json, inputs) → witness
-  PRS->>PRS: BB.generateProof(witness) → proof + verificationKey
-  PRS->>PRS: verify with BB UltraHonkVerifierBackend
-  PRS-->>PAS: { proof, publicInputs, verificationKey }
+
+  PAS->>DB: prisma.walletLink.findMany({ email, verified })
+  DB-->>PAS: WalletLink[]
+  PAS->>VS: computeMultiWallet(addresses)
+  VS->>VS: fetch Horizon → 8 signals per wallet → combine
+  VS-->>PAS: { combined: { scoreNumeric, scoreLevel } }
+
+  PAS->>PRS: generateProof(portfolioValue_cents, threshold)
+  PRS->>PRS: tmpFile = /tmp/proof-{uuid}.json
+  PRS->>PRV: execFile credence-prover prove --pk pk.bin --value {cents} --threshold {cents} --output {tmpFile}
+  PRV->>PRV: load pk.bin, build ThresholdCircuit, Groth16::prove()
+  PRV-->>PRS: write JSON {a, b, c, public_signals}
+  PRS->>PRS: parse JSON, unlink tmpFile
+  PRS-->>PAS: { proof: {a,b,c}, publicSignals: [hex,hex] }
+
   PAS->>PAS: commitment = sha256(portfolioValue.toString(), nonce)
-  PAS->>PAS: proofHash = sha256(proof, verificationKey)
-  PAS->>DB: prisma.commitment.create({ stellarUser, commitment, tier, nonce, proofHash })
+  PAS->>DB: prisma.commitment.create({ stellarUser, commitment, tier, nonce })
   DB-->>PAS: Commitment record
-  PAS-->>PAC: { commitment, tier, proof, publicInputs, verificationKey, nonce }
+
+  PAS-->>PAC: { commitment, tier, proof, publicSignals, vascore, walletCount, nonce }
   PAC-->>F: JSON response
 ```
 
@@ -312,7 +332,10 @@ Multi-wallet combination: takes the maximum account age across all wallets, sums
 - **SupabaseAuthGuard**: Gets the Supabase admin client inside `canActivate()` (not at module level) for the same reason. Extracts `req.user.email` from the JWT payload.
 - **Route ordering in PassportController**: `search`, `my`, and `verify/:commitmentHash` are declared before `:userEmail` to avoid path parameter matching.
 - **Stellar SEP-53 signing**: Wallet verification uses `StellarSdk.StrKey` helpers. The challenge message includes a nonce and expiry. Signature is verified with `verifyMessageSignature`.
-- **bb.js initialization**: The ProvingService loads `credit_passport.json` from the filesystem on `onModuleInit`, creates a single `Noir` instance + `UltraHonkBackend` instance, and reuses them across all proof requests.
+- **ProvingService binary path**: Resolves `credence-prover` relative to `__dirname` (points to `backend/prover/target/release/credence-prover`). Writes proof JSON to `/tmp/proof-{uuid}.json`, reads it back, then deletes it.
+- **Proof generation** is a native x86-64 subprocess (Rust binary) — sub-second execution. No WASM, no JIT warmup.
+- **VAScore in prepareProof**: `PassportService.prepareProof()` now queries `WalletLink` for all verified wallets of the user, calls `VascoreService.computeMultiWallet()`, and includes `vascore` + `walletCount` in the response so the frontend can pass them to the contract.
+- **VAScore re-computed in confirmPassport**: The `confirmPassport` method independently re-computes VAScore rather than reading from the Commitment record — avoids a Prisma schema migration and keeps concern separation.
 
 ## Environment Variables
 
@@ -338,14 +361,36 @@ npm run build
 npm run start:prod     # or: npm run start:dev
 ```
 
+The prover binary must also be built separately:
+
+```bash
+cd prover
+cargo build --release
+cd ..
+```
+
 ## Dependencies
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| @aztec/bb.js | 6.0.0-nightly.20260605 | WASM UltraHonk prover (proof + verify) |
-| @noir-lang/noir_js | 1.0.0-beta.22 | Circuit witness generation from ACIR bytecode |
 | @nestjs/* | 11.x | Framework (core, common, config, platform-express) |
 | @prisma/client | 7.8.0 | ORM |
 | @prisma/adapter-libsql | latest | SQLite driver adapter for Prisma 7 |
 | @stellar/stellar-sdk | 16.0.1 | Contract simulation reads, ScVal parsing |
 | @supabase/supabase-js | 2.108.2 | Admin client for JWT verification |
+
+**Rust prover dependencies** (in `prover/Cargo.toml`):
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| ark-bls12-381 | 0.4.0 | BLS12-381 curve implementation |
+| ark-groth16 | 0.4.0 | Groth16 proof system |
+| ark-r1cs-std | 0.4.0 | R1CS witness + constraint generation |
+| ark-relations | 0.4.0 | Constraint system abstraction |
+| ark-ff | 0.4.0 | Prime field arithmetic (Fr) |
+| ark-serialize | 0.4.0 | Canonical serialize/deserialize for group elements |
+| ark-ec | 0.4.0 | Elliptic curve types (G1Affine, G2Affine) |
+| ark-std | 0.4.0 | PRNG, test utilities |
+| serde / serde_json | 1 | JSON output for proof |
+| hex | 0.4 | Hex encoding/decoding of proof elements |
+| clap | 4 | CLI argument parsing (setup/prove/verify commands) |
