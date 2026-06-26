@@ -90,8 +90,10 @@ impl CreditPassport {
         vascore: u32,
         wallet_count: u32,
     ) -> Result<PassportMetadata, Error> {
+        env.events().publish(("dbg",), "verify_and_issue_start");
         user.require_auth();
 
+        env.events().publish(("dbg",), "fetching_vk");
         let vk: VerificationKey = env.storage()
             .instance()
             .get(&DataKey::VerificationKey)
@@ -147,6 +149,33 @@ impl CreditPassport {
     }
 }
 
+// fn verify_groth16(
+//     env: &Env,
+//     vk: &VerificationKey,
+//     proof: &Groth16Proof,
+//     public_signals: &Vec<Bls12381Fr>,
+// ) -> bool {
+//     let bls = env.crypto().bls12_381();
+
+//     if public_signals.len() + 1 != vk.ic.len() {
+//         return false;
+//     }
+
+//     let mut vk_x = vk.ic.get(0).unwrap();
+//     for i in 0..public_signals.len() {
+//         let s = public_signals.get(i).unwrap();
+//         let v = vk.ic.get(i + 1).unwrap();
+//         let prod = bls.g1_mul(&v, &s);
+//         vk_x = bls.g1_add(&vk_x, &prod);
+//     }
+
+//     let neg_a = -(proof.a.clone());
+//     let vp1 = vec![env, neg_a, vk.alpha.clone(), vk_x, proof.c.clone()];
+//     let vp2 = vec![env, proof.b.clone(), vk.beta.clone(), vk.gamma.clone(), vk.delta.clone()];
+
+//     bls.pairing_check(vp1, vp2)
+// }
+
 fn verify_groth16(
     env: &Env,
     vk: &VerificationKey,
@@ -155,23 +184,49 @@ fn verify_groth16(
 ) -> bool {
     let bls = env.crypto().bls12_381();
 
+    env.events().publish(("dbg",), "start");
+
     if public_signals.len() + 1 != vk.ic.len() {
+        env.events().publish(("dbg",), "bad_ic_len");
         return false;
     }
 
+    env.events().publish(("dbg",), "before_get0");
     let mut vk_x = vk.ic.get(0).unwrap();
+
+    env.events().publish(("dbg",), "before_loop");
+
     for i in 0..public_signals.len() {
+        env.events().publish(("dbg",), i);
+
+        env.events().publish(("dbg",), "before_get_signal");
         let s = public_signals.get(i).unwrap();
+        env.events().publish(("dbg",), "after_get_signal");
+
+        env.events().publish(("dbg",), "before_get_ic");
         let v = vk.ic.get(i + 1).unwrap();
+        env.events().publish(("dbg",), "after_get_ic");
+
+        env.events().publish(("dbg",), "before_mul");
         let prod = bls.g1_mul(&v, &s);
+
+        env.events().publish(("dbg",), "before_add");
         vk_x = bls.g1_add(&vk_x, &prod);
     }
 
+    env.events().publish(("dbg",), "before_neg");
     let neg_a = -(proof.a.clone());
+
+    env.events().publish(("dbg",), "before_pairing");
+
     let vp1 = vec![env, neg_a, vk.alpha.clone(), vk_x, proof.c.clone()];
     let vp2 = vec![env, proof.b.clone(), vk.beta.clone(), vk.gamma.clone(), vk.delta.clone()];
 
-    bls.pairing_check(vp1, vp2)
+    let result = bls.pairing_check(vp1, vp2);
+
+    env.events().publish(("dbg",), "after_pairing");
+
+    result
 }
 
 #[cfg(test)]
