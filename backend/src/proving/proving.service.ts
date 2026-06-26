@@ -26,7 +26,7 @@ export class ProvingService {
   constructor() {
     this.proverPath = resolve(
       __dirname, '..', '..', '..',
-      'backend', 'prover', 'target', 'release', 'credence-prover',
+      'backend', 'prover', 'credence-prover',
     );
     this.pkPath = resolve(
       __dirname, '..', '..', '..',
