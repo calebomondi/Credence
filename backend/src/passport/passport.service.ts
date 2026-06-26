@@ -23,6 +23,10 @@ export class PassportService {
 
     const commitment = this.sha256(portfolioValue.toString(), nonce);
 
+    const proofHash = crypto.createHash('sha256')
+      .update(proofResult.proof.a + proofResult.proof.b + proofResult.proof.c + proofResult.publicSignals.join(''))
+      .digest('hex');
+
     const links = await this.prisma.walletLink.findMany({
       where: { email: userEmail, status: 'verified' },
     });
@@ -36,7 +40,7 @@ export class PassportService {
         commitment,
         tier,
         nonce,
-        proofHash: '',
+        proofHash,
       },
     });
 
@@ -45,6 +49,7 @@ export class PassportService {
       tier,
       proof: proofResult.proof,
       publicSignals: proofResult.publicSignals,
+      proofHash,
       vascore: combined.scoreNumeric,
       walletCount: Math.max(addresses.length, 1),
       nonce,
@@ -160,6 +165,8 @@ export class PassportService {
       where: { userEmail },
       orderBy: { createdAt: 'desc' },
     });
+
+    console.log(`>> ${JSON.stringify(issued)}`)
 
     if (!issued) return null;
 
